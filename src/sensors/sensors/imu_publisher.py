@@ -4,7 +4,7 @@ from rclpy.node import Node
 
 from std_msgs.msg import String, Bool
 from sensor_msgs.msg import Imu
-from tf_transformations import quaternion_from_euler
+from transforms3d.euler import euler2quat
 from geometry_msgs.msg import Quaternion
 
 import math
@@ -230,11 +230,12 @@ class IMUPub(Node):
         imu_msg.angular_velocity.z = math.radians(self.omega)
 
         # Heading is stored as quaternion value
-        q = quaternion_from_euler(0,0,self.heading)
-        imu_msg.orientation.x = q[0]
-        imu_msg.orientation.y = q[1]
-        imu_msg.orientation.z = q[2]
-        imu_msg.orientation.w = q[3]
+        # Note: transforms3d.euler.euler2quat returns (w, x, y, z) order
+        q = euler2quat(0, 0, self.heading)
+        imu_msg.orientation.w = q[0]
+        imu_msg.orientation.x = q[1]
+        imu_msg.orientation.y = q[2]
+        imu_msg.orientation.z = q[3]
         imu_msg.linear_acceleration.x = self.acceleration
         imu_msg.linear_acceleration.y = (ACCx * 0.244/1000 * 9.81)
         imu_msg.linear_acceleration.z = (ACCz * 0.244/1000 * 9.81)

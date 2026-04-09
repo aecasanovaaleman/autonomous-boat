@@ -1,10 +1,6 @@
-import serial
 import time
 import rclpy
-import os
-import math
-from gps import *
-
+import gpsd
 
 from rclpy.node import Node
 from sensor_msgs.msg import NavSatFix, NavSatStatus
@@ -18,12 +14,12 @@ from std_msgs.msg import Bool
 class GPSFixPub(Node):
     def __init__(self):
         super().__init__('gps_fix_publisher')
-        
-        # Creates GPSD object to read data
-        self.gpsd = gps(mode=WATCH_ENABLE|WATCH_NEWSTYLE) 
-        
+
+        # Connect to the local gpsd daemon (gpsd-py3)
+        gpsd.connect()
+
         # Timer to read GPS data
-        self.create_timer(0.05,self.read_gpsd)
+        self.create_timer(0.05, self.read_gpsd)
 
         # Publisher for GPS data
         # Message type: NavSatFix
@@ -43,52 +39,36 @@ class GPSFixPub(Node):
         self.fix.header.frame_id = 'fix_pub'
 
     
-    # Parse GPS data using GPSD. GPSD returns a JSON object to be interpeted
-    # TPV contains lat, long data or if no fix is found
-    # SKY is currently only being used to say if covariance ins't directly known.
-    # GST contains known standard deviation of lat, long in meters
-    def parse_gpsd(self,report):
-        # TIME POSITION VELOCITY REPORT
-        if report['class'] == 'TPV': 
-            fix = getattr(report,'mode',0)
-            if fix > 1: self.fix.status.status = NavSatStatus.STATUS_FIX
-            else: 
-                # Will return if no fix found
-                self.fix.status.status = NavSatStatus.STATUS_NO_FIX 
-                self.fix.position_covariance_type = NavSatFix.COVARIANCE_TYPE_UNKNOWN
-                return
-            self.fix.latitude = getattr(report,'lat',0.0)
-            self.fix.longitude = getattr(report,'lon',0.0)
-            current_time = self.get_clock().now().to_msg()
-            self.fix.header.stamp = current_time
-            # Only publishes when new lat,long data is sent
-            self.pub.publish(self.fix) 
-
-        # SKY REPORT (contains dilution of precision data)
-        # CURRENTLY ONLY BEING USED TO FLAG APPROXIMATED COVARIANCE NOT ACTUALLY USED IN CALCULATIONS
-        elif report['class'] == 'SKY': 
-            if hasattr(report,'xdop') and hasattr(report, 'ydop'):
-                xdop = getattr(report,'xdop')
-                ydop = getattr(report,'ydop')
-                self.fix.position_covariance[0] = xdop
-                self.fix.position_covariance[4] = ydop
-            else:
-                hdop = getattr(report,'hdop',2.0)
-                self.fix.position_covariance[0] = hdop
-                self.fix.position_covariance[4] = hdop
-            self.fix.position_covariance_type = NavSatFix.COVARIANCE_TYPE_APPROXIMATED
-
-        # GST Pseudorange noise report (gives std for lat, long directly)
-        elif report['class'] == 'GST': 
-            self.fix.position_covariance[0] = getattr(report,'lon',4.0)
-            self.fix.position_covariance[4] = getattr(report,'lat',4.0)
-            self.fix.position_covariance_type = NavSatFix.COVARIANCE_TYPE_DIAGONAL_KNOWN
-
-
-    # Read GPS on timer
+    # Read GPS on timer using gpsd-py3
+    # gpsd.get_current() returns a GpsResponse object with mode/lat/lon and
+    # position_precision() for horizontal/vertical error estimates.
     def read_gpsd(self):
-        report = self.gpsd.next()
-        self.parse_gpsd(report)
+        try:
+            packet = gpsd.get_current()
+        except Exception as e:
+            self.get_logger().warn(f"Failed to read GPS: {e}")
+            return
+
+        # mode: 0=no mode, 1=no fix, 2=2D fix, 3=3D fix
+        if packet.mode >= 2:
+            self.fix.status.status = NavSatStatus.STATUS_FIX
+            self.fix.latitude = packet.lat
+            self.fix.longitude = packet.lon
+            self.fix.header.stamp = self.get_clock().now().to_msg()
+
+            # Use horizontal/vertical error precision if available
+            try:
+                xerr, yerr = packet.position_precision()
+                self.fix.position_covariance[0] = float(xerr)
+                self.fix.position_covariance[4] = float(yerr)
+                self.fix.position_covariance_type = NavSatFix.COVARIANCE_TYPE_DIAGONAL_KNOWN
+            except Exception:
+                self.fix.position_covariance_type = NavSatFix.COVARIANCE_TYPE_UNKNOWN
+
+            self.pub.publish(self.fix)
+        else:
+            self.fix.status.status = NavSatStatus.STATUS_NO_FIX
+            self.fix.position_covariance_type = NavSatFix.COVARIANCE_TYPE_UNKNOWN
 
     # Destroy the node when the emergency stop is triggered
     def destroy_node(self,msg):

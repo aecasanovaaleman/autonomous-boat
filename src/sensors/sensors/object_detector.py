@@ -15,7 +15,7 @@ class ObjectDetector(Node):
 
         # Loads the YOLO weights from the specified path (on the Raspberry Pi)
         # Using YOLO12, with version 12 of our custom weights
-        self.model = YOLO('/home/pi2/cleaningoceanplastics/ros2_ws/src/sensors/resource/bestv12.pt')
+        self.model = YOLO('/home/meadams/ros2_ws/src/sensors/resource/bestv12.pt')
         # Opens the webcam footage at index 0 (for the Pi) 
         self.cap = cv2.VideoCapture(0)
         # If webcame cannot open the node is shut down

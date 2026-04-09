@@ -113,7 +113,8 @@ class Teleop(Node):
         self.speed_publisher.publish(msg)
     
     # Destroy the node when the emergency stop is triggered
-    def destroy_node(self,msg):
+    # msg is optional so this also works when called from shutdown (no args)
+    def destroy_node(self, msg=None):
         time.sleep(0.1)
         super().destroy_node()
 
