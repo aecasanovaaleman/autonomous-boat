@@ -3,11 +3,11 @@
 // and drives two bidirectional 40A ESCs via PWM.
 //
 // Protocol (I2C slave @ 0x55):
-//   Byte 0: left_speed   (int8_t, -100..100)
-//   Byte 1: right_speed  (int8_t, -100..100)
-//   Byte 2: (optional) heading PID Kp (uint8_t, scaled x10)
-//   Byte 3: (optional) heading PID Ki (uint8_t, scaled x10)
-//   Byte 4: (optional) heading PID Kd (uint8_t, scaled x10)
+//   Byte 0: left_speed   (signed, -100..100)
+//   Byte 1: right_speed  (signed, -100..100)
+//   Byte 2: (optional) heading PID Kp (unsigned, scaled x10)
+//   Byte 3: (optional) heading PID Ki (unsigned, scaled x10)
+//   Byte 4: (optional) heading PID Kd (unsigned, scaled x10)
 //
 // ESC PWM range: 1000 us = full reverse, 1500 us = neutral, 2000 us = full forward.
 
@@ -15,37 +15,45 @@
 #include <Wire.h>
 #include <ESP32Servo.h>
 
+// ---------- Forward declarations ----------
+// Declared explicitly so the Arduino IDE does not auto-generate prototypes.
+int  speedToPwmUs(int speed);
+void onI2CReceive(int numBytes);
+void armEscs();
+void setup();
+void loop();
+
 // ---------- Configuration ----------
-static const uint8_t  I2C_SLAVE_ADDR   = 0x55;
+static const int I2C_SLAVE_ADDR  = 0x55;
 
-static const int      LEFT_ESC_PIN     = 16;
-static const int      RIGHT_ESC_PIN    = 17;
+static const int LEFT_ESC_PIN    = 16;
+static const int RIGHT_ESC_PIN   = 17;
 
-static const int      PWM_MIN_US       = 1000;
-static const int      PWM_NEUTRAL_US   = 1500;
-static const int      PWM_MAX_US       = 2000;
+static const int PWM_MIN_US      = 1000;
+static const int PWM_NEUTRAL_US  = 1500;
+static const int PWM_MAX_US      = 2000;
 
-static const uint32_t WATCHDOG_MS      = 500;
-static const uint32_t ARM_DURATION_MS  = 2000;
+static const unsigned long WATCHDOG_MS     = 500UL;
+static const unsigned long ARM_DURATION_MS = 2000UL;
 
 // ---------- State ----------
 Servo leftEsc;
 Servo rightEsc;
 
-volatile int8_t   g_leftSpeed  = 0;
-volatile int8_t   g_rightSpeed = 0;
-volatile bool     g_newCommand = false;
-volatile uint32_t g_lastRxMs   = 0;
+volatile int           g_leftSpeed  = 0;
+volatile int           g_rightSpeed = 0;
+volatile bool          g_newCommand = false;
+volatile unsigned long g_lastRxMs   = 0;
 
-volatile float    g_Kp = 1.0f;
-volatile float    g_Ki = 0.0f;
-volatile float    g_Kd = 0.0f;
+volatile float g_Kp = 1.0f;
+volatile float g_Ki = 0.0f;
+volatile float g_Kd = 0.0f;
 
 // ---------- Helpers ----------
 
-// Map an int8 speed in [-100, 100] to an ESC PWM pulse width in microseconds.
-int speedToPwmUs(int8_t speed) {
-  int s = (int)speed;
+// Map a speed in [-100, 100] to an ESC PWM pulse width in microseconds.
+int speedToPwmUs(int speed) {
+  int s = speed;
   if (s >  100) s =  100;
   if (s < -100) s = -100;
   return PWM_NEUTRAL_US + (s * 5);
@@ -60,16 +68,16 @@ void onI2CReceive(int numBytes) {
     return;
   }
 
-  int8_t l = (int8_t)Wire.read();
-  int8_t r = (int8_t)Wire.read();
+  int l = (int)((signed char)Wire.read());
+  int r = (int)((signed char)Wire.read());
 
   g_leftSpeed  = l;
   g_rightSpeed = r;
 
   if (numBytes >= 5) {
-    uint8_t kp = (uint8_t)Wire.read();
-    uint8_t ki = (uint8_t)Wire.read();
-    uint8_t kd = (uint8_t)Wire.read();
+    int kp = (int)((unsigned char)Wire.read());
+    int ki = (int)((unsigned char)Wire.read());
+    int kd = (int)((unsigned char)Wire.read());
     g_Kp = kp / 10.0f;
     g_Ki = ki / 10.0f;
     g_Kd = kd / 10.0f;
@@ -107,14 +115,14 @@ void setup() {
 
   leftEsc.setPeriodHertz(50);
   rightEsc.setPeriodHertz(50);
-  leftEsc.attach(LEFT_ESC_PIN,  PWM_MIN_US, PWM_MAX_US);
+  leftEsc.attach(LEFT_ESC_PIN,   PWM_MIN_US, PWM_MAX_US);
   rightEsc.attach(RIGHT_ESC_PIN, PWM_MIN_US, PWM_MAX_US);
 
   Serial.println("Arming ESCs (2s neutral)...");
   armEscs();
   Serial.println("ESCs armed.");
 
-  Wire.begin((uint8_t)I2C_SLAVE_ADDR);
+  Wire.begin(I2C_SLAVE_ADDR);
   Wire.onReceive(onI2CReceive);
   Serial.print("I2C slave ready @ 0x");
   Serial.println(I2C_SLAVE_ADDR, HEX);
@@ -123,7 +131,7 @@ void setup() {
 }
 
 void loop() {
-  uint32_t now = millis();
+  unsigned long now = millis();
 
   // Watchdog: if no command received in WATCHDOG_MS, force neutral.
   if ((now - g_lastRxMs) > WATCHDOG_MS) {
@@ -136,11 +144,11 @@ void loop() {
   if (g_newCommand) {
     // Snapshot volatile state with interrupts disabled.
     noInterrupts();
-    int8_t ls = g_leftSpeed;
-    int8_t rs = g_rightSpeed;
-    float  kp = g_Kp;
-    float  ki = g_Ki;
-    float  kd = g_Kd;
+    int   ls = g_leftSpeed;
+    int   rs = g_rightSpeed;
+    float kp = g_Kp;
+    float ki = g_Ki;
+    float kd = g_Kd;
     g_newCommand = false;
     interrupts();
 
