@@ -2,10 +2,11 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
 from std_msgs.msg import Bool
-import smbus2
+import serial
+import struct
 import time
 
-# This node handles the transmission of motor speed commands to the motor controller (ESP32) via I2C.
+# This node handles the transmission of motor speed commands to the motor controller (ESP32) via USB Serial.
 # Scaled speed control values from either teleoperation or autonomous control are sent as two
 # signed bytes (int8, -100..100). The ESP32 maps these to ESC PWM microseconds (1000..2000).
 # Publishers:
@@ -14,10 +15,11 @@ class MotorControllerNode(Node):
     def __init__(self):
         super().__init__('motor_controller')
 
-        # I2C address of the motor controller (ESP32) and bus number on the Pi 5
-        self.I2C_address = 0x55
-        self.I2C_bus = 13
-        self.bus = smbus2.SMBus(self.I2C_bus)
+        # Serial port configuration
+        self.serial_port = '/dev/ttyUSB0'
+        self.baud_rate = 115200
+        self.ser = None
+        self.open_serial()
 
         # Subscription to the 'set_motor_speeds' topic
         self.speed_subscription = self.create_subscription(
@@ -26,7 +28,7 @@ class MotorControllerNode(Node):
             self.set_motor_speeds,
             10)
 
-        # Rate limiting: track last I2C write time, enforce 10 Hz max
+        # Rate limiting: enforce 10 Hz max
         self.min_write_interval = 0.1  # 10 Hz
         self.last_write_time = 0.0
 
@@ -39,6 +41,14 @@ class MotorControllerNode(Node):
             10
         )
 
+    def open_serial(self):
+        try:
+            self.ser = serial.Serial(self.serial_port, self.baud_rate, timeout=0.1)
+            self.get_logger().info(f'Serial connected on {self.serial_port} @ {self.baud_rate}')
+        except serial.SerialException as e:
+            self.get_logger().error(f'Failed to open {self.serial_port}: {e}')
+            self.ser = None
+
     # Convert a speed in [-1.0, 1.0] to a signed int8 in [-100, 100]
     def convert_speed(self, speed):
         scaled = int(round(speed * 100))
@@ -47,10 +57,6 @@ class MotorControllerNode(Node):
         elif scaled < -100:
             scaled = -100
         return scaled
-
-    # Convert a signed int to an unsigned byte (two's complement) for I2C transmission
-    def to_byte(self, value):
-        return value & 0xFF
 
     # Processes the incoming speed command from the 'set_motor_speeds' topic
     # Input: [Float32MultiArray] msg containing the speed values for left and right motors
@@ -63,28 +69,28 @@ class MotorControllerNode(Node):
             right = self.convert_speed(msg.data[1])
             self.send_value(left, right)
 
-    # Send the scaled speed values to the motor controller via I2C
+    # Send the scaled speed values to the motor controller via USB Serial
     # Input: [int] left_value, [int] right_value in range [-100, 100]
-    # Rate limited to 10 Hz max, with 2 retries on failure and 5ms post-write delay
+    # Rate limited to 10 Hz max
     def send_value(self, left_value, right_value):
+        if self.ser is None:
+            self.open_serial()
+            if self.ser is None:
+                return
+
         # Rate limit: skip if called faster than 10 Hz
         now = time.monotonic()
         if now - self.last_write_time < self.min_write_interval:
             return
         self.last_write_time = now
 
-        byte_list = [self.to_byte(left_value), self.to_byte(right_value)]
-        for attempt in range(3):
-            try:
-                # Write two signed bytes: [left_speed, right_speed]
-                self.bus.write_i2c_block_data(self.I2C_address, 0, byte_list)
-                time.sleep(0.005)  # 5ms delay after successful write
-                return
-            except Exception as e:
-                if attempt < 2:
-                    time.sleep(0.01)  # 10ms delay before retry
-                else:
-                    self.get_logger().info(f"I2C write failed after 3 attempts: {e}")
+        # Pack as two signed bytes (int8)
+        data = struct.pack('bb', left_value, right_value)
+        try:
+            self.ser.write(data)
+        except serial.SerialException as e:
+            self.get_logger().error(f'Serial write failed: {e}')
+            self.ser = None
 
     # Stop the motors by sending zero speed to both
     def stop_motors(self):
@@ -94,6 +100,8 @@ class MotorControllerNode(Node):
     # Stops the motors before shutting down
     def destroy_node(self, msg=None):
         self.stop_motors()
+        if self.ser is not None:
+            self.ser.close()
         time.sleep(0.1)
         super().destroy_node()
 
