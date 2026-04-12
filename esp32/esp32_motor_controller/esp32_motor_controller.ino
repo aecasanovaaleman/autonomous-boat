@@ -19,7 +19,6 @@
 // Declared explicitly so the Arduino IDE does not auto-generate prototypes.
 int  speedToPwmUs(int speed);
 void onI2CReceive(int numBytes);
-void armEscs();
 void setup();
 void loop();
 
@@ -48,6 +47,10 @@ volatile unsigned long g_lastRxMs   = 0;
 volatile float g_Kp = 1.0f;
 volatile float g_Ki = 0.0f;
 volatile float g_Kd = 0.0f;
+
+// Arming state machine
+bool           g_armed      = false;
+unsigned long  g_armStartMs = 0;
 
 // ---------- Helpers ----------
 
@@ -92,18 +95,10 @@ void onI2CReceive(int numBytes) {
   g_newCommand = true;
 }
 
-// Send neutral signal to both ESCs for the arming duration.
-void armEscs() {
-  leftEsc.writeMicroseconds(PWM_NEUTRAL_US);
-  rightEsc.writeMicroseconds(PWM_NEUTRAL_US);
-  delay(ARM_DURATION_MS);
-}
-
 // ---------- Arduino entry points ----------
 
 void setup() {
   Serial.begin(115200);
-  delay(100);
   Serial.println();
   Serial.println("ESP32 Motor Controller starting...");
 
@@ -118,10 +113,13 @@ void setup() {
   leftEsc.attach(LEFT_ESC_PIN,   PWM_MIN_US, PWM_MAX_US);
   rightEsc.attach(RIGHT_ESC_PIN, PWM_MIN_US, PWM_MAX_US);
 
+  // Begin arming: send neutral and record start time (non-blocking)
+  leftEsc.writeMicroseconds(PWM_NEUTRAL_US);
+  rightEsc.writeMicroseconds(PWM_NEUTRAL_US);
+  g_armStartMs = millis();
   Serial.println("Arming ESCs (2s neutral)...");
-  armEscs();
-  Serial.println("ESCs armed.");
 
+  // Start I2C slave last, after all other initialization
   Wire.begin(I2C_SLAVE_ADDR);
   Wire.onReceive(onI2CReceive);
   Serial.print("I2C slave ready @ 0x");
@@ -133,11 +131,22 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
+  // Arming state machine: hold neutral for ARM_DURATION_MS before accepting commands
+  if (!g_armed) {
+    leftEsc.writeMicroseconds(PWM_NEUTRAL_US);
+    rightEsc.writeMicroseconds(PWM_NEUTRAL_US);
+    if ((now - g_armStartMs) >= ARM_DURATION_MS) {
+      g_armed = true;
+      g_lastRxMs = now;
+      Serial.println("ESCs armed.");
+    }
+    return;
+  }
+
   // Watchdog: if no command received in WATCHDOG_MS, force neutral.
   if ((now - g_lastRxMs) > WATCHDOG_MS) {
     leftEsc.writeMicroseconds(PWM_NEUTRAL_US);
     rightEsc.writeMicroseconds(PWM_NEUTRAL_US);
-    delay(10);
     return;
   }
 
@@ -174,5 +183,4 @@ void loop() {
     Serial.println(kd, 1);
   }
 
-  delay(5);
 }
