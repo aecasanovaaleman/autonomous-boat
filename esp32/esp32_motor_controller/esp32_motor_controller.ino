@@ -17,8 +17,8 @@ void setup();
 void loop();
 
 // ---------- Configuration ----------
-static const int LEFT_ESC_PIN    = 25;
-static const int RIGHT_ESC_PIN   = 26;
+static const int LEFT_ESC_PIN    = 16;
+static const int RIGHT_ESC_PIN   = 17;
 
 static const int PWM_MIN_US      = 1000;
 static const int PWM_NEUTRAL_US  = 1500;
