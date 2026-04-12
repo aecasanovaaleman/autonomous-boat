@@ -1,12 +1,14 @@
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray, Bool
+import sys
+import tty
+import termios
 import time
 import threading
-from pynput import keyboard
 
 # This node provides the teleoperation interface for the robot.
-# It reads keyboard inputs via pynput (works over SSH) and publishes
+# It reads keyboard inputs via tty/termios raw mode (works over SSH) and publishes
 # corresponding motor speed commands on the range -1 to 1.
 # Publishers: 'set_motor_speeds'
 # Subscribers: 'emergency_stop'
@@ -26,6 +28,9 @@ class Teleop(Node):
         # Initializes variable to store the last key pressed
         self.last_input = ''
 
+        # Flag to signal the input thread to stop
+        self.running = True
+
         # Subscription to emergency stop topic
         # If emergency stop is triggered, the node will be destroyed
         self.emergency_stop = self.create_subscription(
@@ -35,23 +40,28 @@ class Teleop(Node):
             10
         )
 
-        # Start pynput keyboard listener in a background thread
-        self.listener = keyboard.Listener(on_press=self.on_key_press)
-        self.listener.daemon = True
-        self.listener.start()
+        # Save original terminal settings so we can restore on exit
+        self.old_settings = termios.tcgetattr(sys.stdin)
+
+        # Start keyboard reading in a background thread
+        self.input_thread = threading.Thread(target=self.read_keys, daemon=True)
+        self.input_thread.start()
 
         self.get_logger().info('Teleop ready. Controls: w/s=fwd/rev, a/d=left/right, space=stop, q=quit')
 
-    def on_key_press(self, key):
+    def read_keys(self):
         try:
-            if hasattr(key, 'char') and key.char:
-                k = key.char.lower()
-                if k in ('w', 'a', 's', 'd', 'q'):
-                    self.process_key(k)
-            elif key == keyboard.Key.space:
-                self.process_key('space')
-        except AttributeError:
-            pass
+            tty.setraw(sys.stdin.fileno())
+            while self.running:
+                key = sys.stdin.read(1)
+                if not key:
+                    break
+                if key == ' ':
+                    self.process_key('space')
+                elif key in ('w', 'a', 's', 'd', 'q'):
+                    self.process_key(key)
+        finally:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
 
     # Process key inputs and update motor speeds accordingly
     # 'w' for forward, 's' for backward, 'a' for left, 'd' for right, 'space' for stop
@@ -105,17 +115,20 @@ class Teleop(Node):
             self.right_value = 0.0
         # Key 'q': quit
         elif key == 'q':
-            self.get_logger().info('Quit requested, shutting down...')
             self.left_value = 0.0
             self.right_value = 0.0
             self.publish_speed()
+            self.running = False
             raise SystemExit
 
         # Store the last key pressed to check for consecutive inputs of the same movement type (linear or rotational)
         self.last_input = key
         # Publish the updated motor speeds
         self.publish_speed()
-        self.get_logger().info(f'L: {self.left_value:.1f}  R: {self.right_value:.1f}')
+        # Print speeds to terminal (write raw since terminal is in raw mode)
+        status = f'\r\nL: {self.left_value:.1f}  R: {self.right_value:.1f}\r\n'
+        sys.stdout.write(status)
+        sys.stdout.flush()
 
     # Publish the motor speed values to the 'set_motor_speeds' topic
     # The values are in the range -1 to 1, where 0 is stop, positive values are forward, and negative values are backward
@@ -127,6 +140,8 @@ class Teleop(Node):
     # Destroy the node when the emergency stop is triggered
     # msg is optional so this also works when called from shutdown (no args)
     def destroy_node(self, msg=None):
+        self.running = False
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
         time.sleep(0.1)
         super().destroy_node()
 
