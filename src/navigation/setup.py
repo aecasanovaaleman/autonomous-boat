@@ -24,6 +24,7 @@ setup(
             'motor_control = navigation.motor_controller:main',
             'teleop        = navigation.teleop:main',
             'waypoint_nav   = navigation.waypoint_nav:main',
+            'mjpeg_stream   = navigation.mjpeg_stream:main',
         ],
     },
 )
