@@ -10,10 +10,7 @@ from geometry_msgs.msg import Quaternion
 import math
 import sys
 import time
-import struct
 import numpy as np
-import smbus
-import struct
 
 from .utils.IMU_lib import * #BerryIMU library containing configuration of acc, gryo, and mag chips
 
@@ -29,7 +26,6 @@ MAX_DATA = 32767 # Arbitrary value to ignore when calculating average
 # This node reads linear acceleration, angular velocity, and heading from the onboard IMU
 # Heading data is processed to calibrate for hard iron distortion along with a complementary filter with gyro
 # All data is run through moving average of previous 20 values to reduce random noise
-# Heading data is sent to ESP for motor drift control over I2C
 # Publishers: 'IMU_data'
 # Subscribers: 'emergency_stop'
 class IMUPub(Node):
@@ -47,11 +43,6 @@ class IMUPub(Node):
         initIMU()       
 
         self.get_logger().info("IMU initialized...")
-
-        # I2C address of ESP32
-        self.I2C_address = 0x55 
-        self.bus = smbus.SMBus(1)       
-
 
         # self.magXmin = -1089 #Previous Calibration values of magnetometer at +/- 8 gauss
         # self.magYmin = -1203
@@ -89,10 +80,6 @@ class IMUPub(Node):
         # Message type: Imu
         self.pub = self.create_publisher(Imu, 'IMU_data', 10)
         
-        # Timer to send heading data to ESP at 20 Hz
-        self.esp_timer_period = 0.05
-        self.esp_timer = self.create_timer(self.esp_timer_period, self.write_esp)
-
         # Flag heading to be updated upon first run
         self.heading = MAX_DATA
 
@@ -247,11 +234,6 @@ class IMUPub(Node):
         # Imu data is published to IMU_data topic
         self.pub.publish(imu_msg)
 
-        # Imu data is then written to esp
-        self.write_esp() 
-
-        # print(MAGx, MAGy, MAGz, self.heading)
-
 
     # Calculates average of previous 20 values for acc, ang_vel, heading_x, and heading_y
     # If any data points are MAX_DATA they are excluded from the average
@@ -266,27 +248,6 @@ class IMUPub(Node):
             if elements[i]:
                 avg_data[i] = avg_data[i]/elements[i]
         return avg_data
-    
-    # Sends heading data to ESP over I2C
-    def write_esp(self):
-        # Sending 0 means that the data is gyro related, sends the heading in rad
-        data = struct.pack('if',0,self.heading) 
-        byte_list = list(data)
-        try:
-            self.bus.write_i2c_block_data(self.I2C_address, 0, byte_list)
-        except:
-            self.get_logger().info("Failed to send value")
-        
-        
-        
-        # NOTE DEBUG: Read the motor values
-        # try:
-        #     data = self.bus.read_i2c_block_data(self.I2C_address, 0, 8)
-        #     currentLeft, currentRight = struct.unpack('ff', bytes(data)) # 8 bytes of data (2 floats)
-        #     currentLeft, currentRight = round(currentLeft, 2), round(currentRight, 2)
-        #     # print(currentLeft, currentRight, self.heading)
-        # except:
-        #     self.get_logger().info("Failed to read value")
 
 # ROS Startup
 def main(args=None):

@@ -23,11 +23,9 @@ setup(
         'console_scripts': [
             'water_sensor      = sensors.water_sensor:main',
             'imu_pub           = sensors.imu_publisher:main',
-            'object_detector   = sensors.object_detector:main',
-            'object_selector   = sensors.object_selector:main',
             'kalman            = sensors.kalman_state:main',
             'gps_pub           = sensors.fix_publisher:main',
-            'battery_monitor   = sensors.battery_monitor:main',  # ← new
+            'camera_pub        = sensors.camera_publisher:main',
         ],
     },
 )
