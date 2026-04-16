@@ -2,7 +2,7 @@ import rclpy
 from rclpy.node import Node
 from ultralytics import YOLO
 from sensor_msgs.msg import CompressedImage
-from std_msgs.msg import Float64MultiArray, Bool
+from std_msgs.msg import Bool
 import cv2
 import time
 
@@ -12,7 +12,7 @@ import time
 # and publishes the annotated frame as a JPEG-compressed image so the MJPEG stream shows the
 # annotated feed (replacing the standalone camera_publisher node).
 # Publishers: 'obstacle_detected', 'camera/image/compressed'
-# Subscribers: 'centroid', 'emergency_stop'
+# Subscribers: 'emergency_stop'
 class ObjectDetector(Node):
     def __init__(self):
         super().__init__('object_detector')
@@ -60,11 +60,6 @@ class ObjectDetector(Node):
         timer_period = 0.1  # seconds
         self.timer = self.create_timer(timer_period, self.process_image)
 
-        # Subscription to the 'centroid' topic
-        # Used during debugging to visualize the centroid of the detected objects
-        self.centroid_listener = self.create_subscription(Float64MultiArray, 'centroid', self.update_centroid, 10)
-        self.centroid = [320, 240]
-
         # Subscription to emergency stop topic
         # If emergency stop is triggered, the node will be destroyed and the camera will be released and recording saved
         self.emergency_stop = self.create_subscription(
@@ -107,10 +102,8 @@ class ObjectDetector(Node):
             self.obstacle_pub.publish(obstacle_msg)
 
 
-            # Annotate the frame with bounding boxes, labels, and centroid
+            # Annotate the frame with bounding boxes and labels
             annotated_frame = results[0].plot()
-            cx, cy = map(int, self.centroid)
-            cv2.circle(annotated_frame, (cx, cy), 5, (0, 0, 255), -1)
 
             # Publish the annotated frame as a JPEG-compressed image so the
             # MJPEG stream shows the detection overlay
@@ -131,11 +124,6 @@ class ObjectDetector(Node):
                 else:
                     # Save the raw frame to the video file
                     self.out.write(frame)
-
-    # Updates the centroid of the detected objects
-    # Input: [Float64MultiArray] msg containing the centroid coordinates
-    def update_centroid(self, msg):
-        self.centroid = msg.data
 
     # Destroy the node when the emergency stop is triggered
     # Stops the camera and ends video recording if enabled
