@@ -1,14 +1,17 @@
 import rclpy
 from rclpy.node import Node
 from ultralytics import YOLO
+from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import Float64MultiArray, Bool
 import cv2
 import time
 
-# This node handles real-time object detection using the YOLO model
+# This node handles real-time object detection using the YOLO model.
 # It captures video from the camera, processes each frame using the pretrained YOLOv8n COCO model,
-# and publishes a Bool flag indicating whether any detected object lies in the middle third of the frame
-# Publishers: 'obstacle_detected'
+# publishes a Bool flag indicating whether any detected object lies in the middle third of the frame,
+# and publishes the annotated frame as a JPEG-compressed image so the MJPEG stream shows the
+# annotated feed (replacing the standalone camera_publisher node).
+# Publishers: 'obstacle_detected', 'camera/image/compressed'
 # Subscribers: 'centroid', 'emergency_stop'
 class ObjectDetector(Node):
     def __init__(self):
@@ -24,10 +27,6 @@ class ObjectDetector(Node):
             self.destroy_node()
             return
         
-        # Flag to control displaying the video
-        # Set to True to enable video display
-        self.show_video = True
-
         # Flag to control saving the video to a file
         # Set to True to enable video recording
         self.save_video = True
@@ -52,6 +51,10 @@ class ObjectDetector(Node):
         # Publisher signaling whether an obstacle is in the middle third of the frame
         # Message type: Bool
         self.obstacle_pub = self.create_publisher(Bool, 'obstacle_detected', 10)
+
+        # Publisher for the annotated camera frame (JPEG-compressed)
+        # Message type: CompressedImage — replaces the standalone camera_publisher node
+        self.image_pub = self.create_publisher(CompressedImage, 'camera/image/compressed', 10)
         
         # Timer to process the image every 0.1 seconds (artificially 10 FPS)
         timer_period = 0.1  # seconds
@@ -104,12 +107,22 @@ class ObjectDetector(Node):
             self.obstacle_pub.publish(obstacle_msg)
 
 
-            if self.save_video or self.show_video:
-                # Annotate the frame with bounding boxes and labels
-                annotated_frame = results[0].plot()
-                # Draw the centroid on the annotated frame
-                cx, cy = map(int, self.centroid)
-                cv2.circle(annotated_frame, (cx, cy), 5, (0,0,255), -1)
+            # Annotate the frame with bounding boxes, labels, and centroid
+            annotated_frame = results[0].plot()
+            cx, cy = map(int, self.centroid)
+            cv2.circle(annotated_frame, (cx, cy), 5, (0, 0, 255), -1)
+
+            # Publish the annotated frame as a JPEG-compressed image so the
+            # MJPEG stream shows the detection overlay
+            encoded, jpeg = cv2.imencode('.jpg', annotated_frame)
+            if encoded:
+                image_msg = CompressedImage()
+                image_msg.header.stamp = self.get_clock().now().to_msg()
+                image_msg.header.frame_id = 'camera'
+                image_msg.format = 'jpeg'
+                image_msg.data = jpeg.tobytes()
+                self.image_pub.publish(image_msg)
+
             # If video recording is enabled, write the frame to the video file
             if self.save_video:
                 if self.save_annotated:
@@ -118,13 +131,6 @@ class ObjectDetector(Node):
                 else:
                     # Save the raw frame to the video file
                     self.out.write(frame)
-            # If video display is enabled, show the annotated frame
-            if self.show_video:
-                # Display the annotated frame
-                cv2.imshow("Real-Time Detection w/ YOLO", annotated_frame)
-            
-            # 1 ms delay to allow for smoother video playback, helps prevent issues with lag due to detection speed
-            cv2.waitKey(1)
 
     # Updates the centroid of the detected objects
     # Input: [Float64MultiArray] msg containing the centroid coordinates
@@ -138,7 +144,6 @@ class ObjectDetector(Node):
             self.cap.release()
             if self.save_video:
                 self.out.release()
-            cv2.destroyAllWindows()
         super().destroy_node()
 
 def main(args=None):

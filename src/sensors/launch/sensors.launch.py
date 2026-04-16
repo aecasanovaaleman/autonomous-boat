@@ -7,7 +7,8 @@ def generate_launch_description():
         Node(package='sensors', executable='imu_pub',         output='screen'),
         Node(package='sensors', executable='gps_pub',         output='screen'),
         Node(package='sensors', executable='water_sensor',    output='screen'),
-        Node(package='sensors', executable='camera_pub',      output='screen'),
+        # object_detector publishes both obstacle_detected and the annotated
+        # camera/image/compressed feed (replacing camera_pub).
         Node(package='sensors', executable='object_detector', output='screen'),
 
     ])
