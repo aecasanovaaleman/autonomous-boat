@@ -67,48 +67,48 @@ class Teleop(Node):
     # 'w' for forward, 's' for backward, 'a' for left, 'd' for right, 'space' for stop
     # If the same key is pressed consecutively, increase the speed at which the robot moves in that direction
     # If a different key is pressed, set the speed to a default value
-    # Speed increments of 0.1 per keypress, capped at ±1.0
+    # Speed increments of 0.05 per keypress, capped at ±0.6
     def process_key(self, key):
         # Key 'w': forward linear movement
         if key == 'w':
             # If 'w' is pressed after another linear speed command ('w' or 's'), increase speed in the forward direction
             if key == self.last_input or self.last_input == 's':
-                self.left_value = min(1.0, self.left_value + 0.1)
-                self.right_value = min(1.0, self.right_value + 0.1)
+                self.left_value = min(0.6, self.left_value + 0.05)
+                self.right_value = min(0.6, self.right_value + 0.05)
             # If 'w' is pressed after a turn command ('a' or 'd'), set speed to a default forward value
             else:
-                self.left_value = 0.2
-                self.right_value = 0.2
+                self.left_value = 0.1
+                self.right_value = 0.1
         # Key 's': backward linear movement
         elif key == 's':
             # If 's' is pressed after another linear speed command ('w' or 's'), increase speed in the backward direction
             if key == self.last_input or self.last_input == 'w':
-                self.left_value = max(-1.0, self.left_value - 0.1)
-                self.right_value = max(-1.0, self.right_value - 0.1)
+                self.left_value = max(-0.6, self.left_value - 0.05)
+                self.right_value = max(-0.6, self.right_value - 0.05)
             # If 's' is pressed after a turn command ('a' or 'd'), set speed to a default backward value
             else:
-                self.left_value = -0.2
-                self.right_value = -0.2
+                self.left_value = -0.1
+                self.right_value = -0.1
         # Key 'a': turn left
         elif key == 'a':
             # If 'a' is pressed after another turn command ('a' or 'd'), increase speed in the left direction
             if key == self.last_input or self.last_input == 'd':
-                self.left_value = max(-1.0, self.left_value - 0.1)
-                self.right_value = min(1.0, self.right_value + 0.1)
+                self.left_value = max(-0.6, self.left_value - 0.05)
+                self.right_value = min(0.6, self.right_value + 0.05)
             # If 'a' is pressed after a linear speed command ('w' or 's'), set speed to a default left turn value
             else:
-                self.left_value = -0.2
-                self.right_value = 0.2
+                self.left_value = -0.1
+                self.right_value = 0.1
         # Key 'd': turn right
         elif key == 'd':
             # If 'd' is pressed after another turn command ('a' or 'd'), increase speed in the right direction
             if key == self.last_input or self.last_input == 'a':
-                self.left_value = min(1.0, self.left_value + 0.1)
-                self.right_value = max(-1.0, self.right_value - 0.1)
+                self.left_value = min(0.6, self.left_value + 0.05)
+                self.right_value = max(-0.6, self.right_value - 0.05)
             # If 'd' is pressed after a linear speed command ('w' or 's'), set speed to a default right turn value
             else:
-                self.left_value = 0.2
-                self.right_value = -0.2
+                self.left_value = 0.1
+                self.right_value = -0.1
         # Space: stop the robot
         elif key == 'space':
             self.left_value = 0.0
